@@ -1,5 +1,5 @@
 import { cn } from "@/lib/utils";
-import type { Severity } from "@/data/mock";
+import type { Severity } from "@/types/odinseye";
 
 const styles: Record<Severity, string> = {
   Critical: "bg-severity-critical/15 text-severity-critical border-severity-critical/40 shadow-[0_0_12px_-2px_hsl(var(--severity-critical)/0.6)]",

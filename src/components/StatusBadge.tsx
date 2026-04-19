@@ -1,5 +1,5 @@
 import { cn } from "@/lib/utils";
-import type { CveStatus } from "@/data/mock";
+import type { CveStatus } from "@/types/odinseye";
 
 const styles: Record<CveStatus, string> = {
   New: "bg-primary/10 text-primary border-primary/40",

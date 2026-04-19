@@ -1,7 +1,19 @@
-import { Search, Bell, User } from "lucide-react";
+import { Search, Bell, LogOut } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
+import { logoutRequest } from "@/lib/api";
 
 export function TopBar({ title, breadcrumb }: { title: string; breadcrumb?: string }) {
   const now = new Date().toLocaleString("en-GB", { hour12: false });
+  const nav = useNavigate();
+  const qc = useQueryClient();
+
+  const logout = async () => {
+    await logoutRequest();
+    await qc.invalidateQueries({ queryKey: ["me"] });
+    nav("/login", { replace: true });
+  };
+
   return (
     <header className="border-b border-border bg-background/60 backdrop-blur-xl sticky top-0 z-20">
       <div className="flex items-center gap-4 px-6 py-3">
@@ -24,13 +36,21 @@ export function TopBar({ title, breadcrumb }: { title: string; breadcrumb?: stri
           <span className="font-mono text-[10px] text-muted-foreground">{now} UTC</span>
         </div>
 
-        <button className="relative h-9 w-9 grid place-items-center rounded-md bg-card/60 border border-border hover:border-primary/50 transition">
+        <button
+          type="button"
+          className="relative h-9 w-9 grid place-items-center rounded-md bg-card/60 border border-border hover:border-primary/50 transition"
+        >
           <Bell className="h-4 w-4" />
           <span className="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-severity-critical pulse-critical" />
         </button>
 
-        <button className="h-9 w-9 grid place-items-center rounded-md bg-primary/10 border border-primary/30 text-primary">
-          <User className="h-4 w-4" />
+        <button
+          type="button"
+          onClick={() => void logout()}
+          className="h-9 w-9 grid place-items-center rounded-md bg-primary/10 border border-primary/30 text-primary hover:bg-primary/20"
+          title="Sign out"
+        >
+          <LogOut className="h-4 w-4" />
         </button>
       </div>
     </header>
