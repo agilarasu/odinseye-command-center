@@ -84,7 +84,7 @@ WantedBy=multi-user.target`;
   };
 
   return (
-    <Collapsible defaultOpen className="panel overflow-hidden group">
+    <Collapsible className="panel overflow-hidden group">
       <CollapsibleTrigger className="flex w-full items-center justify-between p-4 border-b border-border bg-muted/20 hover:bg-muted/30 transition [&[data-state=open]>svg:last-child]:rotate-180">
         <div className="flex items-center gap-3 text-left">
           <Terminal className="h-4 w-4 text-primary shrink-0" />
@@ -728,6 +728,18 @@ export default function Devices() {
     }
   };
 
+  const loadDemo = async () => {
+    try {
+      await apiSend("/api/demo/seed", { method: "POST" });
+      toast.success("Demo devices loaded");
+      await qc.invalidateQueries({ queryKey: ["devices"] });
+      await qc.invalidateQueries({ queryKey: ["vulnerabilities"] });
+      await qc.invalidateQueries({ queryKey: ["dashboard"] });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to load demo");
+    }
+  };
+
   return (
     <>
       <TopBar title="Devices" breadcrumb="OdinsEye / Asset Inventory" />
@@ -803,6 +815,24 @@ export default function Devices() {
       </Dialog>
       <div className="p-6 space-y-6 animate-fade-in">
         {isLoading && <div className="text-sm text-muted-foreground font-mono">Loading devices…</div>}
+        {!isLoading && devices.length === 0 && (
+          <section className="panel p-6">
+            <div className="data-label">Empty inventory</div>
+            <h2 className="font-display text-lg font-semibold mt-1">No devices yet</h2>
+            <p className="text-sm text-muted-foreground mt-1">
+              Add devices manually, install the agent, or load demo data to explore the dashboard.
+            </p>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <Button type="button" onClick={() => setOpenAdd(true)} className="gap-1">
+                <Plus className="h-4 w-4" />
+                Add device
+              </Button>
+              <Button type="button" variant="outline" onClick={() => void loadDemo()}>
+                Load demo devices
+              </Button>
+            </div>
+          </section>
+        )}
         <AgentInstallSection />
 
         <div className="flex items-center justify-between gap-4">
@@ -846,6 +876,10 @@ export default function Devices() {
                 Manually Added Devices <span className="text-muted-foreground font-mono text-xs ml-1">({manual.length})</span>
               </h2>
             </div>
+            <Button type="button" size="sm" className="gap-1" onClick={() => setOpenAdd(true)}>
+              <Plus className="h-4 w-4" />
+              Add device
+            </Button>
           </div>
           <DeviceTable
             rows={manual}
@@ -858,14 +892,6 @@ export default function Devices() {
           />
         </section>
       </div>
-
-      <button
-        type="button"
-        onClick={() => setOpenAdd(true)}
-        className="fixed bottom-6 right-6 h-14 w-14 rounded-full bg-primary text-primary-foreground grid place-items-center shadow-lg glow-primary hover:scale-105 transition-transform z-30"
-      >
-        <Plus className="h-6 w-6" />
-      </button>
 
       <AddDeviceDrawer open={openAdd} onClose={() => setOpenAdd(false)} onSubmit={submitDevice} />
 
