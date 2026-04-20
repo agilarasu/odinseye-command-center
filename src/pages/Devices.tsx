@@ -27,6 +27,8 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { apiGet, apiSend } from "@/lib/api";
+import { useQueryClient } from "@tanstack/react-query";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import {
   AlertDialog,
@@ -39,6 +41,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 function StatusDot({ status }: { status: string }) {
   const map: Record<string, string> = {
@@ -584,17 +587,30 @@ function DeviceEditSheet({
 export default function Devices() {
   const { data: me } = useMe();
   const isAdmin = me?.user?.role === "Admin";
+  const qc = useQueryClient();
   const { data: devices = [], isLoading } = useDevices();
   const addDevice = useAddDevice();
   const delDevice = useDeleteDevice();
   const updateDevice = useUpdateDevice();
-  const scanDevice = useScanDevice();
 
   const [openAdd, setOpenAdd] = useState(false);
   const [q, setQ] = useState("");
   const [viewId, setViewId] = useState<string | null>(null);
   const [editId, setEditId] = useState<string | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [scanReportOpen, setScanReportOpen] = useState(false);
+  const [scanReport, setScanReport] = useState<{
+    deviceId: string;
+    new_vuln_rows: number;
+    parsed_cves: number;
+    apiRequests?: { query: string; returned: number; error?: string; top?: { cve_id: string; severity: string; cvss_score: number; nvd_url: string }[] }[];
+    status?: "running" | "done" | "error";
+    started_at?: string;
+    updated_at?: string;
+    error?: string;
+  } | null>(null);
+  const [scanId, setScanId] = useState<string | null>(null);
+  const [scanElapsed, setScanElapsed] = useState(0);
 
   const filt = (rows: Device[]) =>
     rows.filter((d) => d.hostname.toLowerCase().includes(q.toLowerCase()) || d.ip.includes(q));
@@ -611,13 +627,86 @@ export default function Devices() {
   };
 
   const runScan = async (id: string) => {
+    setScanElapsed(0);
+    setScanReportOpen(true);
+    setScanReport({
+      deviceId: id,
+      new_vuln_rows: 0,
+      parsed_cves: 0,
+      apiRequests: [],
+      status: "running",
+    });
     try {
-      const r = await scanDevice.mutateAsync(id);
-      toast.success(`Scan done: ${r.new_vuln_rows} new CVE row(s) (${r.parsed_cves} CVEs fetched from NVD)`);
+      // Start async scan
+      const r = await apiSend<{ scan_id: string }>(`/api/devices/${id}/scan/start`, { method: "POST" });
+      setScanId(r.scan_id);
     } catch (e) {
+      setScanReport((cur) => (cur ? { ...cur, status: "error", error: e instanceof Error ? e.message : "Scan failed" } : cur));
       toast.error(e instanceof Error ? e.message : "Scan failed");
     }
   };
+
+  // Poll scan status while dialog open
+  useEffect(() => {
+    if (!scanReportOpen || !scanId) return;
+    let alive = true;
+    const started = Date.now();
+    const tick = setInterval(() => setScanElapsed(Math.floor((Date.now() - started) / 1000)), 250);
+
+    const poll = async () => {
+      while (alive) {
+        try {
+          const st = await apiGet<{
+            scan_id: string;
+            device_id: number;
+            status: "running" | "done" | "error";
+            started_at?: string;
+            updated_at?: string;
+            apiRequests?: { query: string; returned: number; error?: string; top?: { cve_id: string; severity: string; cvss_score: number; nvd_url: string }[] }[];
+            new_vuln_rows?: number;
+            parsed_cves?: number;
+            error?: string;
+          }>(`/api/scans/${scanId}`);
+
+          setScanReport((cur) =>
+            cur
+              ? {
+                  ...cur,
+                  status: st.status,
+                  started_at: st.started_at,
+                  updated_at: st.updated_at,
+                  apiRequests: st.apiRequests || cur.apiRequests,
+                  new_vuln_rows: st.new_vuln_rows ?? cur.new_vuln_rows,
+                  parsed_cves: st.parsed_cves ?? cur.parsed_cves,
+                  error: st.error,
+                }
+              : cur,
+          );
+
+          if (st.status === "done") {
+            toast.success(`Scan done: ${st.new_vuln_rows || 0} new CVE row(s) (${st.parsed_cves || 0} CVEs)`); 
+            qc.invalidateQueries({ queryKey: ["vulnerabilities"] });
+            qc.invalidateQueries({ queryKey: ["devices"] });
+            qc.invalidateQueries({ queryKey: ["dashboard"] });
+            break;
+          }
+          if (st.status === "error") {
+            toast.error(st.error || "Scan failed");
+            break;
+          }
+        } catch {
+          // ignore transient poll failures
+        }
+        await new Promise((r) => setTimeout(r, 1200));
+      }
+    };
+
+    void poll();
+    return () => {
+      alive = false;
+      clearInterval(tick);
+    };
+  }, [scanReportOpen, scanId, qc]);
 
   const saveEdit = async (id: string, body: Record<string, unknown>) => {
     try {
@@ -642,6 +731,76 @@ export default function Devices() {
   return (
     <>
       <TopBar title="Devices" breadcrumb="OdinsEye / Asset Inventory" />
+      <Dialog
+        open={scanReportOpen}
+        onOpenChange={(o) => {
+          setScanReportOpen(o);
+          if (!o) {
+            setScanId(null);
+            setScanElapsed(0);
+          }
+        }}
+      >
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Scan report</DialogTitle>
+          </DialogHeader>
+          {scanReport ? (
+            <div className="space-y-4">
+              {scanReport.status === "running" && (
+                <div className="rounded border border-border bg-muted/20 px-3 py-2 text-xs font-mono text-muted-foreground">
+                  Scanning… {scanElapsed}s elapsed
+                </div>
+              )}
+              {scanReport.status === "error" && (
+                <div className="rounded border border-severity-critical/40 bg-severity-critical/10 px-3 py-2 text-xs font-mono text-severity-critical">
+                  Scan failed{scanReport.error ? `: ${scanReport.error}` : ""}
+                </div>
+              )}
+              <div className="grid grid-cols-3 gap-2 text-sm">
+                <div className="data-label">New CVE rows</div>
+                <div className="col-span-2 font-mono text-xs">{scanReport.new_vuln_rows}</div>
+                <div className="data-label">Distinct CVEs</div>
+                <div className="col-span-2 font-mono text-xs">{scanReport.parsed_cves}</div>
+              </div>
+              <div className="rounded border border-border overflow-hidden">
+                <div className="px-3 py-2 text-xs bg-muted/30 border-b border-border data-label">NVD API requests</div>
+                <div className="max-h-[50vh] overflow-y-auto divide-y divide-border">
+                  {(scanReport.apiRequests || []).map((req) => (
+                    <div key={req.query} className="p-3 text-xs">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="font-mono break-all">{req.query}</div>
+                        <div className="font-mono text-muted-foreground whitespace-nowrap">
+                          {req.error ? "error" : `${req.returned} CVEs`}
+                        </div>
+                      </div>
+                      {req.error && <div className="mt-1 text-severity-critical font-mono break-all">{req.error}</div>}
+                      {req.top && req.top.length > 0 && (
+                        <div className="mt-2 space-y-1">
+                          {req.top.map((t) => (
+                            <a
+                              key={t.cve_id}
+                              href={t.nvd_url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="block font-mono text-[11px] text-muted-foreground hover:text-foreground underline-offset-4 hover:underline"
+                            >
+                              {t.cve_id} — {t.severity} {t.cvss_score ? `(${t.cvss_score})` : ""}
+                            </a>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                  {(scanReport.apiRequests || []).length === 0 && <div className="p-3 text-xs text-muted-foreground font-mono">No inventory queries were available for this device.</div>}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="text-sm text-muted-foreground font-mono">No scan report.</div>
+          )}
+        </DialogContent>
+      </Dialog>
       <div className="p-6 space-y-6 animate-fade-in">
         {isLoading && <div className="text-sm text-muted-foreground font-mono">Loading devices…</div>}
         <AgentInstallSection />

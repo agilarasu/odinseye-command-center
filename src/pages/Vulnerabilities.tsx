@@ -7,6 +7,7 @@ import type { Severity, CveStatus } from "@/types/odinseye";
 import { useVulnerabilities, useBulkAcknowledge, downloadFilteredCsv, useBulkAssign } from "@/hooks/useOdinseyeData";
 import { Search, ChevronDown, ChevronRight, ExternalLink, Download, CheckCheck, Users } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { apiGet } from "@/lib/api";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -36,6 +37,14 @@ export default function Vulnerabilities() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [assignOpen, setAssignOpen] = useState(false);
   const [assignTo, setAssignTo] = useState("Blue Team");
+  const [nvdOpen, setNvdOpen] = useState(false);
+  const [nvdQ, setNvdQ] = useState("");
+  const [nvdLoading, setNvdLoading] = useState(false);
+  const [nvdResult, setNvdResult] = useState<{
+    query: string;
+    returned: number;
+    results: { cve_id: string; severity: string; cvss_score: number; nvd_url: string; description: string }[];
+  } | null>(null);
 
   const filtered = useMemo(
     () =>
@@ -107,6 +116,27 @@ export default function Vulnerabilities() {
     }
   };
 
+  const runNvdSearch = async () => {
+    const query = nvdQ.trim();
+    if (!query) {
+      toast.error("Enter a search query");
+      return;
+    }
+    setNvdLoading(true);
+    try {
+      const res = await apiGet<{
+        query: string;
+        returned: number;
+        results: { cve_id: string; severity: string; cvss_score: number; nvd_url: string; description: string }[];
+      }>(`/api/vuln-search?q=${encodeURIComponent(query)}&limit=20`);
+      setNvdResult(res);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Search failed");
+    } finally {
+      setNvdLoading(false);
+    }
+  };
+
   return (
     <>
       <TopBar title="Vulnerabilities" breadcrumb="OdinsEye / CVE Registry" />
@@ -152,6 +182,9 @@ export default function Vulnerabilities() {
               </button>
             ))}
           </div>
+          <Button variant="outline" className="h-8 text-xs font-mono" onClick={() => setNvdOpen(true)}>
+            Manual API search
+          </Button>
           <input type="date" className="bg-background border border-border rounded px-2 py-1 text-xs font-mono text-muted-foreground" />
         </div>
 
@@ -202,6 +235,73 @@ export default function Vulnerabilities() {
                 Cancel
               </Button>
               <Button onClick={() => void submitAssign()}>Save</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog
+          open={nvdOpen}
+          onOpenChange={(o) => {
+            setNvdOpen(o);
+            if (!o) {
+              setNvdLoading(false);
+              setNvdResult(null);
+            }
+          }}
+        >
+          <DialogContent className="max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>Manual vulnerability search (NVD API)</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-2">
+              <Label htmlFor="nvdq">Query</Label>
+              <div className="flex gap-2">
+                <Input
+                  id="nvdq"
+                  value={nvdQ}
+                  onChange={(e) => setNvdQ(e.target.value)}
+                  placeholder="e.g. Hikvision DS-2CD2143G2 or apt (3.1.12+kali1)"
+                  className="font-mono text-sm"
+                />
+                <Button onClick={() => void runNvdSearch()} disabled={nvdLoading}>
+                  {nvdLoading ? "Searching…" : "Search"}
+                </Button>
+              </div>
+            </div>
+            <div className="rounded border border-border overflow-hidden">
+              <div className="px-3 py-2 text-xs bg-muted/30 border-b border-border data-label">
+                Results {nvdResult ? `(${nvdResult.returned})` : ""}
+              </div>
+              <div className="max-h-[50vh] overflow-y-auto divide-y divide-border">
+                {!nvdResult && <div className="p-3 text-xs text-muted-foreground font-mono">Run a search to fetch CVEs from NVD.</div>}
+                {nvdResult &&
+                  (nvdResult.results.length ? (
+                    nvdResult.results.map((r) => (
+                      <a
+                        key={r.cve_id}
+                        href={r.nvd_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="block p-3 hover:bg-muted/20 transition"
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="font-mono text-xs">{r.cve_id}</div>
+                          <div className="font-mono text-[11px] text-muted-foreground whitespace-nowrap">
+                            {r.severity} {r.cvss_score ? `(${r.cvss_score})` : ""}
+                          </div>
+                        </div>
+                        <div className="text-xs text-muted-foreground mt-1 line-clamp-3">{r.description}</div>
+                      </a>
+                    ))
+                  ) : (
+                    <div className="p-3 text-xs text-muted-foreground font-mono">No results.</div>
+                  ))}
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setNvdOpen(false)}>
+                Close
+              </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>

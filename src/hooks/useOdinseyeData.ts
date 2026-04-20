@@ -61,7 +61,11 @@ export function useScanDevice() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) =>
-      apiSend<{ new_vuln_rows: number; parsed_cves: number }>(`/api/devices/${id}/scan`, { method: "POST" }),
+      apiSend<{
+        new_vuln_rows: number;
+        parsed_cves: number;
+        apiRequests?: { query: string; returned: number; error?: string; top?: { cve_id: string; severity: string; cvss_score: number; nvd_url: string }[] }[];
+      }>(`/api/devices/${id}/scan`, { method: "POST" }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["vulnerabilities"] });
       qc.invalidateQueries({ queryKey: ["devices"] });
@@ -100,6 +104,14 @@ export function useAlerts() {
   return useQuery({
     queryKey: ["alerts"],
     queryFn: () => apiGet<AlertRow[]>("/api/alerts"),
+  });
+}
+
+export function useResendAlert() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => apiSend<{ ok: boolean }>(`/api/alerts/${id}/resend`, { method: "POST" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["alerts"] }),
   });
 }
 

@@ -2,9 +2,9 @@ import { useState, type ComponentType } from "react";
 import { TopBar } from "@/components/TopBar";
 import { SeverityBadge } from "@/components/SeverityBadge";
 import { CveLink } from "@/components/CveLink";
-import { useAlerts, useAlertRules, useCreateAlertRule, useDeleteAlertRule } from "@/hooks/useOdinseyeData";
+import { useAlerts, useAlertRules, useCreateAlertRule, useDeleteAlertRule, useResendAlert } from "@/hooks/useOdinseyeData";
 import { useMe } from "@/hooks/useAuth";
-import { Mail, MessageSquare, Webhook, Plus, Trash2 } from "lucide-react";
+import { Mail, MessageSquare, Webhook, Plus, Trash2, RefreshCcw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -33,6 +33,8 @@ export default function Alerts() {
   const { data: rules = [], isLoading: rulesLoading } = useAlertRules();
   const createRule = useCreateAlertRule();
   const deleteRule = useDeleteAlertRule();
+  const resend = useResendAlert();
+  const [resendingId, setResendingId] = useState<string | null>(null);
 
   const [minCvss, setMinCvss] = useState("7.0");
   const [recipient, setRecipient] = useState("");
@@ -87,6 +89,8 @@ export default function Alerts() {
           <div className="divide-y divide-border max-h-[700px] overflow-y-auto">
             {alerts.map((a) => {
               const Icon = methodIcon[a.method] || Mail;
+              const canResend = isAdmin && (a.method === "Email" || a.method === "email");
+              const isThisResending = resendingId === a.id;
               return (
                 <div key={a.id} className="p-4 flex items-start gap-3 hover:bg-muted/20 transition">
                   <div className="mt-0.5 h-8 w-8 rounded grid place-items-center bg-primary/10 border border-primary/30 shrink-0">
@@ -104,6 +108,27 @@ export default function Alerts() {
                       Alert dispatched for <CveLink id={a.cve} /> on <span className="font-mono">{a.device}</span>
                     </div>
                   </div>
+                  {canResend && (
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        setResendingId(a.id);
+                        try {
+                          const r = await resend.mutateAsync(a.id);
+                          toast.success(r.ok ? "Alert resent" : "Resend failed");
+                        } catch (e) {
+                          toast.error(e instanceof Error ? e.message : "Resend failed");
+                        } finally {
+                          setResendingId(null);
+                        }
+                      }}
+                      className="h-9 w-9 grid place-items-center rounded border border-border hover:border-primary/40 hover:text-primary transition shrink-0"
+                      title="Resend email"
+                      disabled={isThisResending}
+                    >
+                      <RefreshCcw className={cn("h-4 w-4", isThisResending && "animate-spin")} />
+                    </button>
+                  )}
                 </div>
               );
             })}
