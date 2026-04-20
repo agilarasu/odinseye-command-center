@@ -14,18 +14,17 @@ const nav = [
 export function AppSidebar() {
   const { pathname } = useLocation();
   return (
-    <aside className="hidden md:flex flex-col w-60 lg:w-64 shrink-0 border-r border-sidebar-border bg-sidebar/95 backdrop-blur-xl relative z-10">
+    <aside className="hidden md:flex flex-col w-60 lg:w-64 shrink-0 border-r border-sidebar-border bg-sidebar/95 backdrop-blur-xl relative z-10 sticky top-0 h-screen">
       <div className="px-5 py-5 border-b border-sidebar-border flex items-center gap-2.5">
         <div className="relative h-8 w-8 rounded-md bg-primary/10 border border-primary/40 flex items-center justify-center glow-primary">
           <Eye className="h-4 w-4 text-primary" />
         </div>
         <div>
           <div className="font-display text-base font-bold tracking-tight">OdinsEye</div>
-          <div className="data-label !text-[9px] text-primary/70">SOC // v2.4.1</div>
         </div>
       </div>
 
-      <nav className="flex-1 px-3 py-4 space-y-0.5">
+      <nav className="flex-1 min-h-0 overflow-y-auto px-3 py-4 space-y-0.5">
         <div className="data-label px-3 pb-2">Operations</div>
         {nav.map((item) => {
           const active = pathname === item.to || (item.to !== "/" && pathname.startsWith(item.to));

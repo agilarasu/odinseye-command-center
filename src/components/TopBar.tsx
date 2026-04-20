@@ -1,4 +1,4 @@
-import { Search, Bell, LogOut } from "lucide-react";
+import { Bell, LogOut } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { logoutRequest } from "@/lib/api";
@@ -22,15 +22,6 @@ export function TopBar({ title, breadcrumb }: { title: string; breadcrumb?: stri
           <h1 className="font-display text-xl font-bold tracking-tight truncate">{title}</h1>
         </div>
 
-        <div className="hidden lg:flex items-center gap-2 px-3 py-1.5 rounded-md bg-card/60 border border-border w-72">
-          <Search className="h-3.5 w-3.5 text-muted-foreground" />
-          <input
-            placeholder="Search CVEs, devices, alerts…"
-            className="bg-transparent border-0 outline-none text-xs flex-1 placeholder:text-muted-foreground/60"
-          />
-          <kbd className="font-mono text-[9px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground border border-border">⌘K</kbd>
-        </div>
-
         <div className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-md bg-card/60 border border-border">
           <span className="h-2 w-2 rounded-full bg-status-online animate-blink" />
           <span className="font-mono text-[10px] text-muted-foreground">{now} UTC</span>
@@ -38,6 +29,7 @@ export function TopBar({ title, breadcrumb }: { title: string; breadcrumb?: stri
 
         <button
           type="button"
+          onClick={() => nav("/alerts")}
           className="relative h-9 w-9 grid place-items-center rounded-md bg-card/60 border border-border hover:border-primary/50 transition"
         >
           <Bell className="h-4 w-4" />
