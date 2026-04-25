@@ -43,6 +43,15 @@ import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
+function cleanVersion(v?: string | null) {
+  if (!v) return "—";
+  return v
+    .replace(/\+kali\d*$/i, "")
+    .replace(/\+deb\d+[a-z0-9.]*$/i, "")
+    .replace(/-kali\d*$/i, "")
+    .trim();
+}
+
 function StatusDot({ status }: { status: string }) {
   const map: Record<string, string> = {
     healthy: "bg-status-online",
@@ -599,11 +608,36 @@ export default function Devices() {
   const [editId, setEditId] = useState<string | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [scanReportOpen, setScanReportOpen] = useState(false);
+  const [scanSelected, setScanSelected] = useState<{ type: string; name: string } | null>(null);
   const [scanReport, setScanReport] = useState<{
     deviceId: string;
     new_vuln_rows: number;
     parsed_cves: number;
-    apiRequests?: { query: string; returned: number; error?: string; top?: { cve_id: string; severity: string; cvss_score: number; nvd_url: string }[] }[];
+    progress?: { completed: number; total: number };
+    components?: { type: string; name: string; version?: string | null; version_display?: string | null }[];
+    cves?: {
+      cve_id: string;
+      severity: string;
+      cvss_score: number;
+      nvd_url: string;
+      matched: boolean;
+      evidence: {
+        criteria: string;
+        vulnerable: boolean;
+        component?: { type: string; name?: string | null; version?: string | null } | null;
+        installed_version?: string | null;
+        bounds?: {
+          versionStartIncluding?: string | null;
+          versionStartExcluding?: string | null;
+          versionEndIncluding?: string | null;
+          versionEndExcluding?: string | null;
+        } | null;
+        identity_match?: boolean;
+        version_match?: boolean | null;
+        matched?: boolean;
+        criteria_version?: string;
+      }[];
+    }[];
     status?: "running" | "done" | "error";
     started_at?: string;
     updated_at?: string;
@@ -629,11 +663,13 @@ export default function Devices() {
   const runScan = async (id: string) => {
     setScanElapsed(0);
     setScanReportOpen(true);
+    setScanSelected(null);
     setScanReport({
       deviceId: id,
       new_vuln_rows: 0,
       parsed_cves: 0,
-      apiRequests: [],
+      progress: { completed: 0, total: 0 },
+      components: [],
       status: "running",
     });
     try {
@@ -662,7 +698,31 @@ export default function Devices() {
             status: "running" | "done" | "error";
             started_at?: string;
             updated_at?: string;
-            apiRequests?: { query: string; returned: number; error?: string; top?: { cve_id: string; severity: string; cvss_score: number; nvd_url: string }[] }[];
+            progress?: { completed: number; total: number };
+            components?: { type: string; name: string; version?: string | null; version_display?: string | null }[];
+            cves?: {
+              cve_id: string;
+              severity: string;
+              cvss_score: number;
+              nvd_url: string;
+              matched: boolean;
+              evidence: {
+                criteria: string;
+                vulnerable: boolean;
+                component?: { type: string; name?: string | null; version?: string | null } | null;
+                installed_version?: string | null;
+                bounds?: {
+                  versionStartIncluding?: string | null;
+                  versionStartExcluding?: string | null;
+                  versionEndIncluding?: string | null;
+                  versionEndExcluding?: string | null;
+                } | null;
+                identity_match?: boolean;
+                version_match?: boolean | null;
+                matched?: boolean;
+                criteria_version?: string;
+              }[];
+            }[];
             new_vuln_rows?: number;
             parsed_cves?: number;
             error?: string;
@@ -675,7 +735,9 @@ export default function Devices() {
                   status: st.status,
                   started_at: st.started_at,
                   updated_at: st.updated_at,
-                  apiRequests: st.apiRequests || cur.apiRequests,
+                  progress: st.progress || cur.progress,
+                  cves: st.cves || cur.cves,
+                  components: st.components || cur.components,
                   new_vuln_rows: st.new_vuln_rows ?? cur.new_vuln_rows,
                   parsed_cves: st.parsed_cves ?? cur.parsed_cves,
                   error: st.error,
@@ -750,18 +812,39 @@ export default function Devices() {
           if (!o) {
             setScanId(null);
             setScanElapsed(0);
+            setScanSelected(null);
           }
         }}
       >
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-w-5xl">
           <DialogHeader>
             <DialogTitle>Scan report</DialogTitle>
           </DialogHeader>
           {scanReport ? (
             <div className="space-y-4">
               {scanReport.status === "running" && (
-                <div className="rounded border border-border bg-muted/20 px-3 py-2 text-xs font-mono text-muted-foreground">
-                  Scanning… {scanElapsed}s elapsed
+                <div className="rounded border border-border bg-muted/20 px-3 py-2 text-xs font-mono text-muted-foreground space-y-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      Scanning… {scanElapsed}s elapsed
+                      {scanReport.progress?.total ? ` • ${scanReport.progress.completed}/${scanReport.progress.total}` : ""}
+                    </div>
+                    <div className="text-[11px]">
+                      {scanReport.progress?.total
+                        ? `${Math.round((scanReport.progress.completed / scanReport.progress.total) * 100)}%`
+                        : "…"}
+                    </div>
+                  </div>
+                  <div className="h-2 w-full rounded bg-background/40 overflow-hidden">
+                    <div
+                      className="h-full bg-primary/70 transition-all"
+                      style={{
+                        width: scanReport.progress?.total
+                          ? `${Math.min(100, Math.max(2, (scanReport.progress.completed / scanReport.progress.total) * 100))}%`
+                          : "25%",
+                      }}
+                    />
+                  </div>
                 </div>
               )}
               {scanReport.status === "error" && (
@@ -776,35 +859,158 @@ export default function Devices() {
                 <div className="col-span-2 font-mono text-xs">{scanReport.parsed_cves}</div>
               </div>
               <div className="rounded border border-border overflow-hidden">
-                <div className="px-3 py-2 text-xs bg-muted/30 border-b border-border data-label">NVD API requests</div>
-                <div className="max-h-[50vh] overflow-y-auto divide-y divide-border">
-                  {(scanReport.apiRequests || []).map((req) => (
-                    <div key={req.query} className="p-3 text-xs">
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="font-mono break-all">{req.query}</div>
-                        <div className="font-mono text-muted-foreground whitespace-nowrap">
-                          {req.error ? "error" : `${req.returned} CVEs`}
+                <div className="px-3 py-2 text-xs bg-muted/30 border-b border-border data-label flex items-center justify-between">
+                  <span>Packages → CVEs</span>
+                  <span className="font-mono text-[11px] text-muted-foreground">
+                    {(scanReport.cves || []).length} CVEs / {(scanReport.cves || []).filter((c) => c.matched).length} matched
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-5">
+                  <div className="md:col-span-2 border-b md:border-b-0 md:border-r border-border bg-muted/10">
+                    <div className="p-3 text-xs data-label">Packages</div>
+                    <div className="max-h-[60vh] overflow-y-auto">
+                      {(scanReport.components || [])
+                        .filter((c) => c.type === "package")
+                        .map((p) => {
+                          const selected = scanSelected?.type === p.type && scanSelected?.name === p.name;
+                          const matchedCount = (scanReport.cves || []).filter((c) =>
+                            c.evidence?.some(
+                              (e) => e.component?.type === "package" && e.component?.name === p.name && e.matched,
+                            ),
+                          ).length;
+                          return (
+                            <button
+                              key={`${p.type}-${p.name}`}
+                              type="button"
+                              onClick={() => setScanSelected({ type: p.type, name: p.name })}
+                              className={cn(
+                                "w-full text-left px-3 py-2 border-t border-border/60 hover:bg-muted/20 transition",
+                                selected && "bg-background/50",
+                              )}
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="font-mono text-[11px] break-all">{p.name}</div>
+                                <div
+                                  className={cn(
+                                    "font-mono text-[11px] tabular-nums",
+                                    matchedCount ? "text-status-online" : "text-muted-foreground",
+                                  )}
+                                >
+                                  {matchedCount}
+                                </div>
+                              </div>
+                              <div className="mt-1 font-mono text-[10px] text-muted-foreground break-all">
+                                v{cleanVersion(p.version_display || p.version)}
+                              </div>
+                            </button>
+                          );
+                        })}
+                      {(scanReport.components || []).filter((c) => c.type === "package").length === 0 && (
+                        <div className="p-3 text-xs text-muted-foreground font-mono">No packages found for this device.</div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="md:col-span-3 bg-background/30">
+                    <div className="p-3 flex items-center justify-between gap-3 border-b border-border">
+                      <div>
+                        <div className="data-label">CVEs</div>
+                        <div className="font-mono text-[11px] text-muted-foreground">
+                          {scanSelected ? `${scanSelected.name}` : "Select a package to view CVEs"}
                         </div>
                       </div>
-                      {req.error && <div className="mt-1 text-severity-critical font-mono break-all">{req.error}</div>}
-                      {req.top && req.top.length > 0 && (
-                        <div className="mt-2 space-y-1">
-                          {req.top.map((t) => (
-                            <a
-                              key={t.cve_id}
-                              href={t.nvd_url}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="block font-mono text-[11px] text-muted-foreground hover:text-foreground underline-offset-4 hover:underline"
-                            >
-                              {t.cve_id} — {t.severity} {t.cvss_score ? `(${t.cvss_score})` : ""}
-                            </a>
-                          ))}
+                      {scanSelected && (
+                        <Button type="button" size="sm" variant="outline" onClick={() => setScanSelected(null)}>
+                          Clear
+                        </Button>
+                      )}
+                    </div>
+
+                    <div className="max-h-[60vh] overflow-y-auto divide-y divide-border">
+                      {(scanReport.cves || [])
+                        .filter((c) =>
+                          scanSelected
+                            ? c.evidence?.some(
+                                (e) =>
+                                  e.component?.type === scanSelected.type && e.component?.name === scanSelected.name,
+                              )
+                            : false,
+                        )
+                        .map((c) => {
+                          const ev = (c.evidence || []).filter(
+                            (e) => e.component?.type === "package" && e.component?.name === scanSelected?.name,
+                          );
+                          return (
+                            <div key={c.cve_id} className={cn("p-3 text-xs", c.matched ? "bg-status-online/10" : "bg-background/40")}>
+                              <div className="flex items-start justify-between gap-3">
+                                <a
+                                  href={c.nvd_url}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="font-mono text-[11px] underline-offset-4 hover:underline break-all"
+                                >
+                                  {c.cve_id}
+                                </a>
+                                <div className="font-mono text-[11px] text-muted-foreground whitespace-nowrap">
+                                  {c.severity} {c.cvss_score ? `(${c.cvss_score})` : ""}
+                                </div>
+                              </div>
+
+                              {ev.slice(0, 6).map((e, idx) => {
+                                const b = e.bounds;
+                                const affected = b
+                                  ? [
+                                      b.versionStartIncluding ? `>=${b.versionStartIncluding}` : null,
+                                      b.versionStartExcluding ? `>${b.versionStartExcluding}` : null,
+                                      b.versionEndIncluding ? `<=${b.versionEndIncluding}` : null,
+                                      b.versionEndExcluding ? `<${b.versionEndExcluding}` : null,
+                                    ]
+                                      .filter(Boolean)
+                                      .join(" ")
+                                  : e.criteria_version && e.criteria_version !== "*" && e.criteria_version !== "-"
+                                    ? `=${e.criteria_version}`
+                                    : "any";
+
+                                const fix = b?.versionEndExcluding
+                                  ? `>=${b.versionEndExcluding}`
+                                  : b?.versionEndIncluding
+                                    ? `>${b.versionEndIncluding}`
+                                    : "—";
+
+                                return (
+                                  <div key={`${e.criteria}-${idx}`} className="mt-2 grid grid-cols-3 gap-2 font-mono text-[11px]">
+                                    <div className="col-span-3 text-muted-foreground break-all">{e.criteria}</div>
+                                    <div className="text-muted-foreground">Affected</div>
+                                    <div className="col-span-2 text-foreground break-all">{affected}</div>
+                                    <div className="text-muted-foreground">My version</div>
+                                    <div className="col-span-2 text-foreground break-all">{cleanVersion(e.installed_version)}</div>
+                                    <div className="text-muted-foreground">Fix version</div>
+                                    <div className="col-span-2 text-foreground break-all">{fix}</div>
+                                  </div>
+                                );
+                              })}
+                              {ev.length === 0 && (
+                                <div className="mt-2 font-mono text-[11px] text-muted-foreground">No evidence for this package.</div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      {scanSelected &&
+                        (scanReport.cves || []).filter((c) =>
+                          c.evidence?.some(
+                            (e) => e.component?.type === scanSelected.type && e.component?.name === scanSelected.name,
+                          ),
+                        ).length === 0 && (
+                          <div className="p-3 text-xs text-muted-foreground font-mono">No CVEs found for this package.</div>
+                        )}
+                      {!scanSelected && (
+                        <div className="p-3 text-xs text-muted-foreground font-mono">
+                          Pick a package on the left to see CVEs and version ranges.
                         </div>
                       )}
                     </div>
-                  ))}
-                  {(scanReport.apiRequests || []).length === 0 && <div className="p-3 text-xs text-muted-foreground font-mono">No inventory queries were available for this device.</div>}
+                  </div>
                 </div>
               </div>
             </div>
